@@ -57,3 +57,40 @@ class MovielensDataloader:          # Data loader class for the movielens datase
 
         self.users = users
         return self.users
+
+    
+    def load_all_data(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:     # load all datasets and return as tuple
+
+        ratings = self.load_ratings()
+        movies = self.load_movies()
+        users = self.load_users()
+
+        return ratings, movies, users
+    
+    
+    def get_train_test_split(self) -> Tuple[pd.DataFrame, pd.DataFrame]:            # load predefined train/test split from MovieLens
+
+        if self.ratings is None:
+            self.load_ratings()
+
+        train_path = os.path.join(self.data_path, 'ua.base')
+        test_path = os.path.join(self.data_path, 'ua.test')
+
+        train_data = pd.read_csv(
+            train_path,
+            sep='\t',
+            names=['user_id', 'item_id', 'rating', 'timestamp']
+        )
+
+        test_data = pd.read_csv(
+            test_path,
+            sep='\t', 
+            names=['user_id', 'item_id', 'rating', 'timestamp']
+        )
+
+        return train_data, test_data
+
+
+
+
+
