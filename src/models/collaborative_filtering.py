@@ -147,6 +147,121 @@ class CollaborativeFiltering:
         return np.clip(prediction, 1, 5)
 
 
+    def recommend_items(self, user_idx: int, n_recommendations: int = 10, method='user_based') -> List[Tuple[int, float]]:      # Recommend top-N items for a user, returns a list of (item_idx, predicted_rating) tuples
+
+        unrated_items = np.where(self.user_item_matrix[user_idx, :] == 0)[0]    # Items not rated by the user
+
+        predictions = []
+
+        for item_idx in unrated_items:
+            if method == 'user_based':
+                pred = self.predict_user_based(user_idx, item_idx)
+            else:
+                pred = self.predict_item_based(user_idx, item_idx)
+            predictions.append((item_idx, pred))
+        
+        predictions.sort(key=lambda x: x[1], reverse=True)              # sort by predicted rating
+
+        return predictions[:n_recommendations]
+    
+    def get_user_neighbors(self, user_idx: int, n_neighbors: int = 10) -> List[Tuple[int, float]]:      # get similar users to a given user (returns a list of (neighbor_idx, similarity) tuples)
+
+        if self.user_similarity is None:
+            raise ValueError("Model not fitted. Call fit() first.")
+        
+        similarities = self.user_similarity[user_idx]
+
+        similarities[user_idx] = -1             # exclude self
+
+        neighbor_indices = np.argsort(similarities)[-n_neighbors:][::-1]
+        neighbors = [(idx, similarities[idx]) for idx in neighbor_indices]
+
+        return neighbors
+    
+    def item_neighbors(self, item_idx: int, n_neighbors: int = 10) -> List[Tuple[int, float]]:          # get most similar items to a given item
+
+        if self.item_similarity is None:
+            raise ValueError("Model not fitted. Call fit() first.")
+        
+        similarities = self.item_similarity[item_idx]
+
+        similarities[item_idx] = -1             # exclude self
+
+        neighbor_indices = np.argsort(similarities)[-n_neighbors:][::-1]
+        neighbors = [(idx, similarities[idx]) for idx in neighbor_indices]
+        
+        return neighbors
+
+
+class MemoryEfficientCF:                # Memory-efficient implementation using sparse matrices and k-NN (better for large datasets)
+    # this method never cteas user_num x user_num similarity matrix
+    def __init__(self, k=50, similarity_metric = 'cosine'):
+        self.k = k
+        self.similarity_metric = similarity_metric
+        self.user_knn = None
+        self.item_knn = None
+        self.user_item_matrix = None
+
+    def fit(self, sparse_matrix):       # fit the model using sparse user-item matrix
+
+        self.user_item_matrix = sparse_matrix
+
+        self.user_knn = NearestNeighbors(
+            n_neighbors=min(self.k, sparse_matrix.shape[0]-1),
+            metric=self.similarity_metric
+        )
+        self.user_knn.fit(sparse_matrix)
+
+        self.item_knn = NearestNeighbors(
+            n_neighbors=min(self.k, sparse_matrix.shape[1]-1),
+            metric=self.similarity_metric
+        )
+        self.item_knn.fit(sparse_matrix.T)
+
+    
+    def predict_user_based_sparse(self, user_idx: int, item_idx: int) -> float:     # predict rating usign sparse user-based CF
+
+        distances, indices = self.user_knn.kneighbors(                      # find k nearest neighbors
+            self.user_item_matrix[user_idx], n_neighbors=self.k
+        )       
+
+        similarities = 1 - distances.flatten()              # convert distances to similarities
+        neighbor_indices = indices.flatten()
+
+        neighbor_ratings = []
+        neighbor_similarities = []
+
+        for i, neighbor_idx in enumerate(neighbor_indices):
+            if neighbor_idx != user_idx:                    # Exclude self
+                rating = self.user_item_matrix[neighbor_idx, item_idx]
+                if rating > 0:                              # Only consider neighbors who rated the item
+                    neighbor_ratings.append(rating)
+                    neighbor_similarities.append(similarities[i])
+
+        if not neighbor_ratings:
+            return 3.0                  # Default rating
+        
+        neighbor_ratings = np.array(neighbor_ratings)
+        neighbor_similarities = np.array(neighbor_similarities)
+
+        if np.sum(neighbor_similarities) == 0:
+            return np.mean(neighbor_ratings)
+        
+        prediction = np.sum(neighbor_similarities * neighbor_ratings) / np.sum(neighbor_similarities)
+        return np.clip(prediction, 1, 5)
+
+
+
+
+    
+        
+
+
+
+
+
+
+
 
 
 
