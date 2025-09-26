@@ -30,22 +30,13 @@ class RecommendationMetrics:        # Comprehensive evaluation metrics for recom
         top_k_true = y_true[:k]     # Get top k predictions
         relevant_items = sum(1 for rating in top_k_true if rating >= threshold)     # Count relevant items (above threshold). threshold: Threshold for considering an item as relevant
         
-        return relevant_items / k
+        return relevant_items / k       # Divided by k to calculate precision
     
 
     @staticmethod
     def recall_at_k(y_true: List, y_pred: List, k: int, threshold: float = 3.5,     # Recall at K - fraction of relevant items that are recommended
                    all_relevant_items: int = None) -> float:
-        """
-        Recall at K - fraction of relevant items that are recommended
         
-        Args:
-            y_true: True ratings for recommended items
-            y_pred: Predicted ratings for recommended items
-            k: Number of recommendations to consider
-            threshold: Threshold for considering an item as relevant
-            all_relevant_items: Total number of relevant items for the user
-        """
         if len(y_pred) < k:
             k = len(y_pred)
         
@@ -61,11 +52,11 @@ class RecommendationMetrics:        # Comprehensive evaluation metrics for recom
         if all_relevant_items == 0:
             return 0.0
         
-        return relevant_recommended / all_relevant_items
+        return relevant_recommended / all_relevant_items        # Divided by all_relevant_items to compute recall
     
     @staticmethod
-    def f1_score_at_k(y_true: List, y_pred: List, k: int, threshold: float = 3.5) -> float:
-        """F1 Score at K"""
+    def f1_score_at_k(y_true: List, y_pred: List, k: int, threshold: float = 3.5) -> float: # F1 score
+        
         precision = RecommendationMetrics.precision_at_k(y_true, y_pred, k, threshold)
         recall = RecommendationMetrics.recall_at_k(y_true, y_pred, k, threshold)
         
@@ -75,11 +66,8 @@ class RecommendationMetrics:        # Comprehensive evaluation metrics for recom
         return 2 * (precision * recall) / (precision + recall)
     
     @staticmethod
-    def dcg_at_k(y_true: List, k: int) -> float:
-        """
-        Discounted Cumulative Gain at K
-        Measures the quality of ranking with position discount
-        """
+    def dcg_at_k(y_true: List, k: int) -> float:        # Discounted Cumulative Gain at K. Measures the quality of ranking with position discount
+        
         if len(y_true) < k:
             k = len(y_true)
         
@@ -93,22 +81,17 @@ class RecommendationMetrics:        # Comprehensive evaluation metrics for recom
         return dcg
     
     @staticmethod
-    def ndcg_at_k(y_true: List, y_pred: List, k: int) -> float:
-        """
-        Normalized Discounted Cumulative Gain at K
-        DCG normalized by ideal DCG
-        """
+    def ndcg_at_k(y_true: List, y_pred: List, k: int) -> float: # Normalized Discounted Cumulative Gain at K. DCG normalized by ideal DCG
+        
         if len(y_pred) < k:
             k = len(y_pred)
         
         if k == 0:
             return 0.0
         
-        # Calculate DCG for current ranking
-        dcg = RecommendationMetrics.dcg_at_k(y_true[:k], k)
+        dcg = RecommendationMetrics.dcg_at_k(y_true[:k], k)  # Calculate DCG for current ranking
         
-        # Calculate ideal DCG (sorted by true ratings)
-        ideal_true = sorted(y_true, reverse=True)
+        ideal_true = sorted(y_true, reverse=True)           # Calculate ideal DCG (sorted by true ratings)
         idcg = RecommendationMetrics.dcg_at_k(ideal_true[:k], k)
         
         if idcg == 0:
@@ -117,14 +100,8 @@ class RecommendationMetrics:        # Comprehensive evaluation metrics for recom
         return dcg / idcg
     
     @staticmethod
-    def mean_reciprocal_rank(y_true: List, threshold: float = 3.5) -> float:
-        """
-        Mean Reciprocal Rank - position of first relevant item
+    def mean_reciprocal_rank(y_true: List, threshold: float = 3.5) -> float:        # Mean Reciprocal Rank - position of first relevant item
         
-        Args:
-            y_true: True ratings in recommendation order
-            threshold: Threshold for relevance
-        """
         for i, rating in enumerate(y_true):
             if rating >= threshold:
                 return 1.0 / (i + 1)
@@ -132,15 +109,8 @@ class RecommendationMetrics:        # Comprehensive evaluation metrics for recom
         return 0.0
     
     @staticmethod
-    def hit_rate_at_k(y_true: List, k: int, threshold: float = 3.5) -> float:
-        """
-        Hit Rate at K - whether at least one relevant item is in top K
+    def hit_rate_at_k(y_true: List, k: int, threshold: float = 3.5) -> float:       # Hit Rate at K - whether at least one relevant item is in top K
         
-        Args:
-            y_true: True ratings for recommended items
-            k: Number of recommendations to consider
-            threshold: Threshold for relevance
-        """
         if len(y_true) < k:
             k = len(y_true)
         
@@ -179,8 +149,8 @@ class RecommendationMetrics:        # Comprehensive evaluation metrics for recom
             for i in range(len(user_recs)):
                 for j in range(i + 1, len(user_recs)):
                     item_i, item_j = user_recs[i], user_recs[j]
-                    # Diversity = 1 - similarity
-                    diversity = 1 - item_similarity_matrix[item_i, item_j]
+            
+                    diversity = 1 - item_similarity_matrix[item_i, item_j]  # Diversity = 1 - similarity
                     pairwise_diversity += diversity
                     pairs += 1
             
@@ -191,14 +161,8 @@ class RecommendationMetrics:        # Comprehensive evaluation metrics for recom
         return total_diversity / valid_users if valid_users > 0 else 0.0
     
     @staticmethod
-    def catalog_coverage(recommendations: List[List[int]], n_items: int) -> float:
-        """
-        Catalog Coverage - fraction of items that appear in recommendations
+    def catalog_coverage(recommendations: List[List[int]], n_items: int) -> float:      # Catalog Coverage - fraction of items that appear in recommendations
         
-        Args:
-            recommendations: List of recommendation lists for each user
-            n_items: Total number of items in catalog
-        """
         recommended_items = set()
         
         for user_recs in recommendations:
@@ -211,10 +175,6 @@ class RecommendationMetrics:        # Comprehensive evaluation metrics for recom
         """
         Novelty Score - average novelty of recommended items
         Novelty = -log2(popularity)
-        
-        Args:
-            recommendations: List of recommendation lists for each user
-            item_popularity: Dictionary mapping item_id to popularity score
         """
         total_novelty = 0
         total_items = 0
