@@ -210,3 +210,205 @@ class RecommendationEvaluator:
                 fold_results['ndcg_at_10'].append(ranking_results.get('ndcg_at_10', 0))
         
         return fold_results
+    
+
+    def compare_models(self, models_dict: Dict[str, Any], 
+                      user_item_matrix: np.ndarray, 
+                      test_data: pd.DataFrame) -> pd.DataFrame:         # Compare multiple models on the same test set
+        
+        results = []
+        
+        for model_name, model in models_dict.items():
+            print(f"Evaluating {model_name}...")
+            
+            y_true = []                 # Predict ratings for test set
+            y_pred = []
+            
+            for _, row in test_data.iterrows():
+                user_idx = int(row['user_idx'])
+                item_idx = int(row['item_idx'])
+                true_rating = row['rating']
+                
+                try:
+                    pred_rating = model.predict(user_idx, item_idx)
+                    y_true.append(true_rating)
+                    y_pred.append(pred_rating)
+                except:
+                    continue
+            
+            if len(y_true) > 0:
+                accuracy_results = self.evaluate_accuracy(np.array(y_true), np.array(y_pred))       # Accuracy metrics
+                
+                ranking_results = self.evaluate_ranking(test_data, model, user_item_matrix)         # Ranking metrics
+                
+                model_results = {'Model': model_name}               # Combine results
+                model_results.update(accuracy_results)
+                model_results.update(ranking_results)
+                
+                results.append(model_results)
+        
+        return pd.DataFrame(results)
+    
+
+    def statistical_significance_test(self, predictions1: np.ndarray, 
+                                    predictions2: np.ndarray, 
+                                    true_ratings: np.ndarray,
+                                    test_type: str = 'paired_ttest') -> Dict[str, float]:       # Test statistical significance between two models
+        """
+        Test statistical significance between two models
+        
+        Args:
+            predictions1: Predictions from model 1
+            predictions2: Predictions from model 2
+            true_ratings: True ratings
+            test_type: Type of statistical test
+            
+        Returns:
+            Dictionary with test results
+        """
+        errors1 = np.abs(predictions1 - true_ratings)           # Calculate errors for both models
+        errors2 = np.abs(predictions2 - true_ratings)
+        
+        if test_type == 'paired_ttest':
+            statistic, p_value = stats.ttest_rel(errors1, errors2)
+        elif test_type == 'wilcoxon':
+            statistic, p_value = stats.wilcoxon(errors1, errors2)
+        else:
+            raise ValueError(f"Unsupported test type: {test_type}")
+        
+        return {
+            'statistic': statistic,
+            'p_value': p_value,
+            'significant': p_value < 0.05,
+            'mean_error_1': np.mean(errors1),
+            'mean_error_2': np.mean(errors2)
+        }
+    
+
+
+class OnlineEvaluationSimulator:            # Simulate online A/B testing for recommendation systems
+    
+    def __init__(self, control_model, treatment_model):
+        self.control_model = control_model
+        self.treatment_model = treatment_model
+        self.results = {
+            'control': {'impressions': 0, 'clicks': 0, 'conversions': 0},
+            'treatment': {'impressions': 0, 'clicks': 0, 'conversions': 0}
+        }
+    
+    def simulate_user_interaction(self, user_idx: int, user_item_matrix: np.ndarray,
+                                group: str = 'control', n_recommendations: int = 10) -> Dict:       # Simulate user interaction with recommendations
+        """
+        Simulate user interaction with recommendations
+        
+        Args:
+            user_idx: User index
+            user_item_matrix: User-item matrix
+            group: 'control' or 'treatment'
+            n_recommendations: Number of recommendations to show
+            
+        Returns:
+            Interaction results
+        """
+        model = self.control_model if group == 'control' else self.treatment_model
+        
+        recommendations = model.recommend_items(user_idx, user_item_matrix, n_recommendations)      # Get recommendations
+        
+        # Simulate clicks based on predicted ratings (higher rating = higher click probability)
+        clicks = 0
+        conversions = 0
+        
+        for item_idx, pred_rating in recommendations:
+            # Click probability based on predicted rating (normalized to 0-1)
+            click_prob = (pred_rating - 1) / 4  # Rating 1-5 -> 0-1
+            
+            if np.random.random() < click_prob:
+                clicks += 1
+                
+                # Conversion probability (lower than click probability)
+                conversion_prob = click_prob * 0.3  # 30% of clicks convert
+                if np.random.random() < conversion_prob:
+                    conversions += 1
+        
+        # Update results
+        self.results[group]['impressions'] += n_recommendations
+        self.results[group]['clicks'] += clicks
+        self.results[group]['conversions'] += conversions
+        
+        return {
+            'group': group,
+            'impressions': n_recommendations,
+            'clicks': clicks,
+            'conversions': conversions
+        }
+    
+    def run_ab_test(self, user_indices: List[int], user_item_matrix: np.ndarray,
+                   test_duration_days: int = 14) -> Dict:
+        """
+        Run A/B test simulation
+        
+        Args:
+            user_indices: List of user indices to include in test
+            user_item_matrix: User-item matrix
+            test_duration_days: Duration of test in days
+            
+        Returns:
+            A/B test results with statistical significance
+        """
+        # Reset results
+        self.results = {
+            'control': {'impressions': 0, 'clicks': 0, 'conversions': 0},
+            'treatment': {'impressions': 0, 'clicks': 0, 'conversions': 0}
+        }
+        
+        # Randomly assign users to groups
+        np.random.shuffle(user_indices)
+        control_users = user_indices[:len(user_indices)//2]
+        treatment_users = user_indices[len(user_indices)//2:]
+        
+        # Simulate interactions
+        for user_idx in control_users:
+            self.simulate_user_interaction(user_idx, user_item_matrix, 'control')
+        
+        for user_idx in treatment_users:
+            self.simulate_user_interaction(user_idx, user_item_matrix, 'treatment')
+        
+        # Calculate metrics
+        control_ctr = (self.results['control']['clicks'] / 
+                      max(self.results['control']['impressions'], 1))
+        treatment_ctr = (self.results['treatment']['clicks'] / 
+                        max(self.results['treatment']['impressions'], 1))
+        
+        control_cvr = (self.results['control']['conversions'] / 
+                      max(self.results['control']['impressions'], 1))
+        treatment_cvr = (self.results['treatment']['conversions'] / 
+                        max(self.results['treatment']['impressions'], 1))
+        
+        # Statistical significance test (simplified)
+        ctr_lift = (treatment_ctr - control_ctr) / control_ctr * 100 if control_ctr > 0 else 0
+        cvr_lift = (treatment_cvr - control_cvr) / control_cvr * 100 if control_cvr > 0 else 0
+        
+        return {
+            'control_metrics': {
+                'ctr': control_ctr,
+                'cvr': control_cvr,
+                **self.results['control']
+            },
+            'treatment_metrics': {
+                'ctr': treatment_ctr,
+                'cvr': treatment_cvr,
+                **self.results['treatment']
+            },
+            'lifts': {
+                'ctr_lift_percent': ctr_lift,
+                'cvr_lift_percent': cvr_lift
+            },
+            'test_summary': {
+                'total_users': len(user_indices),
+                'control_users': len(control_users),
+                'treatment_users': len(treatment_users),
+                'test_duration_days': test_duration_days
+            }
+        }
+    
+    
