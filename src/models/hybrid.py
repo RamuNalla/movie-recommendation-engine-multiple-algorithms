@@ -118,7 +118,7 @@ class WeightedHybrid:       # Combines prediction from multiple models using lea
         bounds = [(0, 1) for _ in self.model_names]
         
         # Optimize
-        result = minimize(objective, initial_weights, method='SLSQP', 
+        result = minimize(objective, initial_weights, method='SLSQP',   # Sequential least squares Programming algorithm
                          bounds=bounds, constraints=constraints)
         
         if result.success:
@@ -129,3 +129,107 @@ class WeightedHybrid:       # Combines prediction from multiple models using lea
         else:
             print("Weight optimization failed, keeping original weights")
             return self.weights
+        
+class SwitchingHybrid:  # Switching Hybrid Recommender System. Switches between different models based on user/item characteristics
+
+    def __init__(self, models: Dict[str, Any], switching_criteria: str = 'user_profile_size'):
+        """
+        Initialize switching hybrid model
+        
+        Args:
+            models: Dictionary of {model_name: model_instance}
+            switching_criteria: Criteria for switching ('user_profile_size', 'item_popularity', etc.)
+        """
+        self.models = models
+        self.switching_criteria = switching_criteria
+        self.model_names = list(models.keys())
+        self.user_profile_sizes = None
+        self.item_popularity = None
+
+    def fit(self, user_item_matrix: np.ndarray, ratings_df: pd.DataFrame):
+        """
+        Fit switching criteria and prepare for model selection
+        
+        Args:
+            user_item_matrix: User-item rating matrix
+            ratings_df: Ratings DataFrame for calculating statistics
+        """
+        
+        self.user_profile_sizes = np.sum(user_item_matrix > 0, axis=1)      # # Calculate user profile sizes (number of ratings per user)
+        
+        item_counts = ratings_df['item_idx'].value_counts().to_dict()       # Calculate item popularity (number of ratings per item)
+        self.item_popularity = {i: item_counts.get(i, 0) 
+                              for i in range(user_item_matrix.shape[1])}
+        
+        print(f"Switching Hybrid fitted with {len(self.models)} models")
+
+    def _select_model(self, user_idx: int, item_idx: int) -> str:           # Select appropriate model based on switching criteria
+        """
+        Select appropriate model based on switching criteria
+        
+        Args:
+            user_idx: User index
+            item_idx: Item index
+            
+        Returns:
+            Selected model name
+        """
+        if self.switching_criteria == 'user_profile_size':
+            # Use collaborative filtering for users with many ratings,
+            # content-based for users with few ratings
+            user_ratings_count = self.user_profile_sizes[user_idx]
+            
+            if user_ratings_count >= 20:        # Heavy user
+                return 'collaborative_filtering' if 'collaborative_filtering' in self.models else self.model_names[0]
+            else:                               # Light user
+                return 'content_based' if 'content_based' in self.models else self.model_names[-1]
+        
+        elif self.switching_criteria == 'item_popularity':
+            # Use collaborative filtering for popular items,
+            # content-based for unpopular items
+            item_rating_count = self.item_popularity.get(item_idx, 0)
+            
+            if item_rating_count >= 50:     # Popular item
+                return 'collaborative_filtering' if 'collaborative_filtering' in self.models else self.model_names[0]
+            else:                           # Unpopular item
+                return 'content_based' if 'content_based' in self.models else self.model_names[-1]
+        
+        else:
+            return self.model_names[0]      # Default to first model
+        
+
+    def predict(self, user_idx: int, item_idx: int) -> float:       # Predict rating using selected model
+        """
+        Args:
+            user_idx: User index
+            item_idx: Item index
+        Returns:
+            Prediction from selected model
+        """
+        selected_model = self._select_model(user_idx, item_idx)
+        
+        try:
+            return self.models[selected_model].predict(user_idx, item_idx)
+        except Exception as e:
+            print(f"Selected model {selected_model} failed: {e}")
+            for model_name, model in self.models.items():       # Fallback to first available model
+                try:
+                    return model.predict(user_idx, item_idx)
+                except:
+                    continue
+            return 3.0  # Ultimate fallback
+        
+    def recommend_items(self, user_idx: int, user_item_matrix: np.ndarray, 
+                       n_recommendations: int = 10) -> List[Tuple[int, float]]:     # Recommend items using switching hybrid approach
+        
+        unrated_items = np.where(user_item_matrix[user_idx, :] == 0)[0]
+        
+        predictions = []
+        for item_idx in unrated_items:
+            pred = self.predict(user_idx, item_idx)
+            predictions.append((item_idx, pred))
+        
+        predictions.sort(key=lambda x: x[1], reverse=True)
+        return predictions[:n_recommendations]
+    
+    
