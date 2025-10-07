@@ -494,4 +494,80 @@ class FeatureCombinationHybrid:     # Feature Combination Hybrid using Machine L
             return dict(zip(feature_names, importances))
         else:
             return {}
-    
+
+class CascadeHybrid:            # Cascade Hybrid Recommender System. Uses models in sequence, with later models refining earlier predictions
+
+    def __init__(self, models: List[Tuple[str, Any]], refinement_threshold: float = 0.5):
+        """
+        Initialize cascade hybrid model
+        
+        Args:
+            models: List of (model_name, model_instance) tuples in order of cascade
+            refinement_threshold: Confidence threshold for moving to next model
+        """
+        self.models = models
+        self.model_names = [name for name, _ in models]
+        self.refinement_threshold = refinement_threshold
+
+    def predict(self, user_idx: int, item_idx: int, user_item_matrix: np.ndarray = None) -> float:
+        """
+        Predict using cascade of models
+        
+        Args:
+            user_idx: User index
+            item_idx: Item index
+            user_item_matrix: User-item matrix (used for confidence calculation)
+            
+        Returns:
+            Prediction from cascade
+        """
+        for i, (model_name, model) in enumerate(self.models):
+            try:
+                prediction = model.predict(user_idx, item_idx)
+                
+                # Calculate confidence (simplified approach)
+                confidence = self._calculate_confidence(user_idx, item_idx, model_name, user_item_matrix)
+                
+                # If confident enough or last model, return prediction
+                if confidence >= self.refinement_threshold or i == len(self.models) - 1:
+                    return prediction
+                
+            except Exception as e:
+                print(f"Model {model_name} failed in cascade: {e}")
+                continue
+        
+        return 3.0  # Fallback
+
+    def _calculate_confidence(self, user_idx: int, item_idx: int, model_name: str, 
+                            user_item_matrix: np.ndarray) -> float:
+        """
+        Calculate prediction confidence (simplified heuristic)
+        
+        Args:
+            user_idx: User index
+            item_idx: Item index
+            model_name: Name of the model
+            user_item_matrix: User-item matrix
+            
+        Returns:
+            Confidence score between 0 and 1
+        """
+        if user_item_matrix is None:
+            return 1.0  # Always confident if no matrix provided
+        
+        # Simple heuristics for confidence
+        if 'collaborative' in model_name.lower():
+            # CF confidence based on user profile size and item popularity
+            user_ratings = np.sum(user_item_matrix[user_idx] > 0)
+            item_ratings = np.sum(user_item_matrix[:, item_idx] > 0)
+            confidence = min(user_ratings / 50.0, 1.0) * min(item_ratings / 50.0, 1.0)
+        
+        elif 'content' in model_name.lower():
+            # Content-based always confident if item exists
+            confidence = 0.8
+        
+        else:
+            # Default confidence
+            confidence = 0.6
+        
+        return confidence
