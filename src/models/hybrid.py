@@ -571,3 +571,101 @@ class CascadeHybrid:            # Cascade Hybrid Recommender System. Uses models
             confidence = 0.6
         
         return confidence
+
+
+    def recommend_items(self, user_idx: int, user_item_matrix: np.ndarray, 
+                       n_recommendations: int = 10) -> List[Tuple[int, float]]:
+        """
+        Recommend items using cascade approach
+        """
+        unrated_items = np.where(user_item_matrix[user_idx, :] == 0)[0]
+        
+        predictions = []
+        for item_idx in unrated_items:
+            pred = self.predict(user_idx, item_idx, user_item_matrix)
+            predictions.append((item_idx, pred))
+        
+        predictions.sort(key=lambda x: x[1], reverse=True)
+        return predictions[:n_recommendations]
+
+class EnsembleHybrid:           # Ensemble Hybrid using multiple voting/averaging strategies.  Advanced combination of multiple models with different aggregation methods
+        
+    def __init__(self, models: Dict[str, Any], ensemble_method: str = 'weighted_voting',
+                 model_weights: Optional[Dict[str, float]] = None):
+        """
+        Initialize ensemble hybrid model
+        
+        Args:
+            models: Dictionary of {model_name: model_instance}
+            ensemble_method: 'weighted_voting', 'rank_aggregation', 'stacked_ensemble'
+            model_weights: Model weights for weighted voting
+        """
+        self.models = models
+        self.model_names = list(models.keys())
+        self.ensemble_method = ensemble_method
+        self.model_weights = model_weights or {name: 1.0 for name in self.model_names}
+        
+        # For stacked ensemble
+        self.stacking_model = LinearRegression() if ensemble_method == 'stacked_ensemble' else None
+        self.stacking_fitted = False
+
+    def predict(self, user_idx: int, item_idx: int) -> float:
+        """
+        Predict using ensemble method
+        """
+        if self.ensemble_method == 'weighted_voting':
+            return self._weighted_voting_predict(user_idx, item_idx)
+        elif self.ensemble_method == 'rank_aggregation':
+            return self._rank_aggregation_predict(user_idx, item_idx)
+        elif self.ensemble_method == 'stacked_ensemble':
+            return self._stacked_ensemble_predict(user_idx, item_idx)
+        else:
+            raise ValueError(f"Unknown ensemble method: {self.ensemble_method}")
+        
+
+    def _weighted_voting_predict(self, user_idx: int, item_idx: int) -> float:
+        """Weighted voting prediction"""
+        predictions = []
+        weights = []
+        
+        for model_name, model in self.models.items():
+            try:
+                pred = model.predict(user_idx, item_idx)
+                predictions.append(pred)
+                weights.append(self.model_weights[model_name])
+            except:
+                continue
+        
+        if not predictions:
+            return 3.0
+        
+        # Weighted average
+        total_weight = sum(weights)
+        weighted_pred = sum(p * w for p, w in zip(predictions, weights)) / total_weight
+        
+        return np.clip(weighted_pred, 1, 5)
+    
+    def _rank_aggregation_predict(self, user_idx: int, item_idx: int) -> float:
+        """Rank aggregation prediction (Borda count)"""
+        # This is simplified - would need item rankings from each model
+        return self._weighted_voting_predict(user_idx, item_idx)
+    
+    def _stacked_ensemble_predict(self, user_idx: int, item_idx: int) -> float:
+        """Stacked ensemble prediction"""
+        if not self.stacking_fitted:
+            raise ValueError("Stacked ensemble not fitted. Call fit_stacking() first.")
+        
+        # Get predictions from base models
+        base_predictions = []
+        for model_name, model in self.models.items():
+            try:
+                pred = model.predict(user_idx, item_idx)
+                base_predictions.append(pred)
+            except:
+                base_predictions.append(3.0)  # Default prediction
+        
+        # Predict using stacking model
+        X_stack = np.array(base_predictions).reshape(1, -1)
+        prediction = self.stacking_model.predict(X_stack)[0]
+        
+        return np.clip(prediction, 1, 5)
