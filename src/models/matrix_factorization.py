@@ -210,7 +210,7 @@ class BiasedMF:         # Matrix factorization with User and Item biases (bias m
         self.user_biases = np.zeros(n_users)
         self.item_biases = np.zeros(n_items)
 
-        for epoch in self.n_epochs:
+        for epoch in range(self.n_epochs):
 
             shuffled_df = ratings_df.sample(frac=1).reset_index(drop=True)  # shuffle training data
 
