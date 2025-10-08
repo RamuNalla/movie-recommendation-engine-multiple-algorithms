@@ -191,6 +191,16 @@ class CollaborativeFiltering:
         neighbors = [(idx, similarities[idx]) for idx in neighbor_indices]
         
         return neighbors
+    
+    def predict(self, user_idx: int, item_idx: int) -> float:
+        """
+        Predict rating for a user-item pair using the selected similarity metric.
+        Defaults to user-based if metric is cosine or pearson, otherwise item-based.
+        """
+        if self.similarity_metric in ['cosine', 'pearson']:
+            return self.predict_user_based(user_idx, item_idx)
+        else:
+            return self.predict_item_based(user_idx, item_idx)
 
 
 class MemoryEfficientCF:                # Memory-efficient implementation using sparse matrices and k-NN (better for large datasets)
