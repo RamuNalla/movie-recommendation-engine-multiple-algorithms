@@ -669,3 +669,57 @@ class EnsembleHybrid:           # Ensemble Hybrid using multiple voting/averagin
         prediction = self.stacking_model.predict(X_stack)[0]
         
         return np.clip(prediction, 1, 5)
+
+    def fit_stacking(self, validation_data: pd.DataFrame):
+        """
+        Fit stacking ensemble on validation data
+        
+        Args:
+            validation_data: Validation dataset for training stacking model
+        """
+        if self.ensemble_method != 'stacked_ensemble':
+            raise ValueError("fit_stacking only applies to stacked_ensemble method")
+        
+        X_stack = []
+        y_stack = []
+        
+        for _, row in validation_data.iterrows():
+            user_idx = int(row['user_idx'])
+            item_idx = int(row['item_idx'])
+            true_rating = row['rating']
+            
+            # Get base model predictions
+            base_predictions = []
+            for model_name, model in self.models.items():
+                try:
+                    pred = model.predict(user_idx, item_idx)
+                    base_predictions.append(pred)
+                except:
+                    base_predictions.append(3.0)
+            
+            X_stack.append(base_predictions)
+            y_stack.append(true_rating)
+        
+        # Train stacking model
+        X_stack = np.array(X_stack)
+        y_stack = np.array(y_stack)
+        
+        self.stacking_model.fit(X_stack, y_stack)
+        self.stacking_fitted = True
+        
+        print("Stacking ensemble fitted successfully!")
+
+    def recommend_items(self, user_idx: int, user_item_matrix: np.ndarray, 
+                       n_recommendations: int = 10) -> List[Tuple[int, float]]:
+        """
+        Recommend items using ensemble approach
+        """
+        unrated_items = np.where(user_item_matrix[user_idx, :] == 0)[0]
+        
+        predictions = []
+        for item_idx in unrated_items:
+            pred = self.predict(user_idx, item_idx)
+            predictions.append((item_idx, pred))
+        
+        predictions.sort(key=lambda x: x[1], reverse=True)
+        return predictions[:n_recommendations]
