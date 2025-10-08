@@ -8,7 +8,7 @@ from typing import List, Tuple, Dict, Optional
 import warnings
 warnings.filterwarnings('ignore')
 
-class NeuralCollaborativeFIltering:         # Neural Collaborative filtering (combines matrix factorization and Multi-layer perceptron)
+class NeuralCollaborativeFiltering:         # Neural Collaborative filtering (combines matrix factorization and Multi-layer perceptron)
 
     def __init__(self, n_users: int, n_items: int, embedding_dim: int = 50, 
                  hidden_units: List[int] = [128, 64, 32], dropout_rate: float = 0.2,

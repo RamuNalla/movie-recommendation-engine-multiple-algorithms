@@ -3,7 +3,7 @@ import pandas as pd
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from scipy import stats
 from typing import List, Tuple, Dict, Any
-from metrics import RecommendationMetrics
+from .metrics import RecommendationMetrics
 import warnings
 warnings.filterwarnings('ignore')
 
