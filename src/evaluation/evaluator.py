@@ -49,8 +49,12 @@ class RecommendationEvaluator:
         for user_idx, user_data in user_groups:
             # Get recommendations for this user
             try:
-                recommendations = model.recommend_items(user_idx, user_item_matrix, 
-                                                       n_recommendations=max(self.k_values))
+                # Use isinstance to check for CollaborativeFiltering
+                from models.collaborative_filtering import CollaborativeFiltering
+                if isinstance(model, CollaborativeFiltering):
+                    recommendations = model.recommend_items(user_idx, n_recommendations=max(self.k_values))
+                else:
+                    recommendations = model.recommend_items(user_idx, user_item_matrix, n_recommendations=max(self.k_values))
                 
                 if not recommendations:
                     continue
