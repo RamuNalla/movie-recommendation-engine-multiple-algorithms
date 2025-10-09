@@ -98,14 +98,15 @@ class CollaborativeFiltering:
         
         relevant_similarities = relevant_similarities[positive_idx]
         relevant_ratings = relevant_ratings[positive_idx]
+        item_raters_filtered = item_raters[positive_idx]
 
         if np.sum(np.abs(relevant_similarities)) == 0:          
             return self.user_means[user_idx] 
         
-        # Weighred average prediction
+        # Weighted average prediction
         prediction = self.user_means[user_idx] + \
-                    np.sum(relevant_similarities * (relevant_ratings - self.user_means[item_raters[positive_idx]])) / \
-                    np.sum(np.abs(relevant_similarities))
+            np.sum(relevant_similarities * (relevant_ratings - self.user_means[item_raters_filtered])) / \
+            np.sum(np.abs(relevant_similarities))
 
         return np.clip(prediction, 1, 5)            # clip the prediction to a valid rating range
     
