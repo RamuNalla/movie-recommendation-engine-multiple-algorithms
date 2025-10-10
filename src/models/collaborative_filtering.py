@@ -78,37 +78,30 @@ class CollaborativeFiltering:
         
         user_similarities = self.user_similarity[user_idx]              # get similar users (row of pre-calculated similarity scores)
 
-        item_raters = np.where(self.user_item_matrix[:, item_idx] != 0)[0]      # find users who rated this item
-
-        if len(item_raters) == 0:
-            return self.user_means[user_idx]            # if no one rated for this item, fall back to the user's average rating
-        
-        relevant_similarities = user_similarities[item_raters]              # filter the similarity scores for user_idx only with who rated for the item
-        
-        relevant_ratings = self.user_item_matrix[item_raters, item_idx]     # get the actual ratings these users gave to the item
-
-        if len(item_raters) > self.n_neighbors:                 # select top-k neighbors
+        item_rater_indices = np.where(self.user_item_matrix[:, item_idx] != 0)[0]      # find users who rated this item
+        if len(item_rater_indices) == 0:
+            return self.user_means[user_idx]
+        relevant_similarities = user_similarities[item_rater_indices]
+        relevant_ratings = self.user_item_matrix[item_rater_indices, item_idx]
+        # Top-k selection
+        if len(item_rater_indices) > self.n_neighbors:
             top_k_idx = np.argsort(relevant_similarities)[-self.n_neighbors:]
             relevant_similarities = relevant_similarities[top_k_idx]
-            relevant_ratings = relevant_ratings[top_k_idx] 
-
-        positive_idx = relevant_similarities > 0                # remove negative similarities for better predictions
+            relevant_ratings = relevant_ratings[top_k_idx]
+            item_rater_indices = item_rater_indices[top_k_idx]
+        # Remove negative similarities
+        positive_idx = relevant_similarities > 0
         if np.sum(positive_idx) == 0:
             return self.user_means[user_idx]
-        
         relevant_similarities = relevant_similarities[positive_idx]
         relevant_ratings = relevant_ratings[positive_idx]
-        item_raters_filtered = item_raters[positive_idx]
-
-        if np.sum(np.abs(relevant_similarities)) == 0:          
-            return self.user_means[user_idx] 
-        
-        # Weighted average prediction
+        item_rater_indices = item_rater_indices[positive_idx]
+        if np.sum(np.abs(relevant_similarities)) == 0:
+            return self.user_means[user_idx]
         prediction = self.user_means[user_idx] + \
-            np.sum(relevant_similarities * (relevant_ratings - self.user_means[item_raters_filtered])) / \
+            np.sum(relevant_similarities * (relevant_ratings - self.user_means[item_rater_indices])) / \
             np.sum(np.abs(relevant_similarities))
-
-        return np.clip(prediction, 1, 5)            # clip the prediction to a valid rating range
+        return np.clip(prediction, 1, 5)
     
 
     def predict_item_based(self, user_idx: int, item_idx: int) -> float:        # predict rating based on item-based collaborative filtering

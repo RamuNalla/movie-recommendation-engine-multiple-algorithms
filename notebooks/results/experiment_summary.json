@@ -1,0 +1,19 @@
+{
+  "dataset": "MovieLens 100k",
+  "total_users": 943,
+  "total_items": 1682,
+  "total_ratings": 100000,
+  "sparsity": 0.9369533063577546,
+  "models_evaluated": 12,
+  "evaluation_metrics": [
+    "RMSE",
+    "MAE",
+    "Precision@K",
+    "Recall@K",
+    "NDCG@K"
+  ],
+  "best_models": {
+    "accuracy": "UserCF_Pearson",
+    "ranking": "NMF"
+  }
+}

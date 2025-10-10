@@ -1,0 +1,16 @@
+Model,Rank,Movie,Predicted_Score
+SVD,1,L.A. Confidential (1997),5.0
+SVD,2,Amistad (1997),5.0
+SVD,3,"Great Day in Harlem, A (1994)",4.669319191888411
+SVD,4,Little City (1998),4.640670802859761
+SVD,5,Star Kid (1997),4.629771214759039
+ContentBased,1,Mercury Rising (1998),4.743985603501396
+ContentBased,2,Smilla's Sense of Snow (1997),4.721227469286432
+ContentBased,3,Fire Down Below (1997),4.721227469286432
+ContentBased,4,"Spanish Prisoner, The (1997)",4.691330232151518
+ContentBased,5,Apollo 13 (1995),4.667016688210839
+WeightedHybrid,1,Aiqing wansui (1994),4.674437498771481
+WeightedHybrid,2,Someone Else's America (1995),4.544327271254321
+WeightedHybrid,3,"Great Day in Harlem, A (1994)",4.5428708748619595
+WeightedHybrid,4,"Saint of Fort Washington, The (1993)",4.503365525386873
+WeightedHybrid,5,Santa with Muscles (1996),4.4302233816926435

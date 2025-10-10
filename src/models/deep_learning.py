@@ -216,6 +216,20 @@ class AutoEncoder:      # Autoencoder for collaborative filtering
         
         return self.encoder.predict(user_item_matrix, verbose=0)
     
+    def recommend_items(self, user_idx: int, user_item_matrix: np.ndarray, n_recommendations: int = 10) -> list:
+        """
+        Recommend top-N items for a user using the autoencoder's predicted ratings.
+        Returns a list of (item_idx, predicted_rating) tuples.
+        """
+        if self.model is None:
+            raise ValueError("Model not built. Call build_model() first.")
+        user_vector = user_item_matrix[user_idx:user_idx+1]
+        reconstructed = self.model.predict(user_vector, verbose=0)[0]
+        unrated_items = np.where(user_item_matrix[user_idx] == 0)[0]
+        predictions = [(item_idx, np.clip(reconstructed[item_idx], 1, 5)) for item_idx in unrated_items]
+        predictions.sort(key=lambda x: x[1], reverse=True)
+        return predictions[:n_recommendations]
+
 class WideAndDeep:          # Wide and Deep Learning for Recommender Systems
 
     def __init__(self, n_users: int, n_items: int, user_features: np.ndarray = None,
