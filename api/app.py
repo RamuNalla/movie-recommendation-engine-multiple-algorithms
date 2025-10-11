@@ -129,3 +129,28 @@ class HealthResponse(BaseModel):
     models_loaded: List[str]
     dataset_info: Dict[str, Any]
 
+
+# API Endpoints
+
+@app.get("/", response_model=HealthResponse)
+async def health_check():
+    """Health check endpoint"""
+    return HealthResponse(
+        status="healthy",
+        models_loaded=list(models_dict.keys()),
+        dataset_info=model_info
+    )
+
+@app.get("/models")
+async def get_available_models():
+    """Get list of available recommendation models"""
+    return {
+        "available_models": list(models_dict.keys()),
+        "default_model": "WeightedHybrid",
+        "model_descriptions": {
+            "UserCF": "User-based Collaborative Filtering",
+            "SVD": "Singular Value Decomposition Matrix Factorization",
+            "ContentBased": "Content-based filtering using movie features",
+            "WeightedHybrid": "Weighted combination of multiple models"
+        }
+    }
