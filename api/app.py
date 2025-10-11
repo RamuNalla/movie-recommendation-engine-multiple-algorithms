@@ -21,3 +21,22 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Global variables for models and data
+models_dict = {}
+user_item_matrix = None
+movies_df = None
+preprocessor = None
+model_info = {}
+
+# Pydantic models for API
+class RecommendationRequest(BaseModel):
+    user_id: int
+    n_recommendations: int = 10
+    model_name: str = "WeightedHybrid"
+
+class RecommendationResponse(BaseModel):
+    user_id: int
+    recommendations: List[Dict[str, Any]]
+    model_used: str
+    metadata: Dict[str, Any]
+
