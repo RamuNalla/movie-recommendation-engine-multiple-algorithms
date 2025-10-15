@@ -6,6 +6,7 @@ Provides RESTful endpoints for getting recommendations
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import numpy as np
@@ -18,7 +19,7 @@ import sys
 # Add src to path
 sys.path.append('../src')
 
-from data.data_loader import MovieLensDataLoader
+from data.data_loader import MovielensDataloader
 from models.hybrid import WeightedHybrid
 
 # Initialize FastAPI app
@@ -57,6 +58,10 @@ class RecommendationResponse(BaseModel):
     model_used: str
     metadata: Dict[str, Any]
 
+    class Config:
+        # This allows arbitrary types and disables validation for the response
+        arbitrary_types_allowed = True
+
 class UserRatingRequest(BaseModel):
     user_id: int
     item_id: int
@@ -89,7 +94,7 @@ async def load_models_and_data():
     try:
         # Load data
         print("Loading data...")
-        loader = MovieLensDataLoader('data/raw/ml-100k/')
+        loader = MovielensDataloader('../data/raw/ml-100k/')
         ratings, movies, users = loader.load_all_data()
         movies_df = movies
         
@@ -185,75 +190,221 @@ async def get_available_models():
         }
     }
 
-@app.post("/recommendations", response_model=RecommendationResponse)
+@app.post("/recommendations")
 async def get_recommendations(request: RecommendationRequest):
     """Get movie recommendations for a user"""
     try:
-        # Validate user ID
-        if request.user_id < 1 or request.user_id > model_info['n_users']:
-            raise HTTPException(
-                status_code=400,
-                detail=f"User ID must be between 1 and {model_info['n_users']}"
-            )
+        # Basic validation
+        if request.user_id < 1:
+            raise HTTPException(status_code=400, detail="User ID must be positive")
         
-        # Validate model name
         if request.model_name not in models_dict:
             raise HTTPException(
                 status_code=400,
-                detail=f"Model '{request.model_name}' not available. Available models: {list(models_dict.keys())}"
+                detail=f"Model '{request.model_name}' not available. Available: {list(models_dict.keys())}"
             )
         
-        # Convert user ID to index
+        # Convert user ID to index with proper error handling
         try:
+            if request.user_id not in preprocessor.user_encoder.classes_:
+                valid_range = f"1 to {max(preprocessor.user_encoder.classes_)}"
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"User ID {request.user_id} not found. Valid range: {valid_range}"
+                )
+            
             user_idx = preprocessor.user_encoder.transform([request.user_id])[0]
-        except ValueError:
+        except HTTPException:
+            raise
+        except Exception as e:
             raise HTTPException(
-                status_code=404,
-                detail=f"User ID {request.user_id} not found in dataset"
+                status_code=500,
+                detail=f"Error converting user ID: {str(e)}"
             )
         
-        # Get model and generate recommendations
-        model = models_dict[request.model_name]
-        raw_recommendations = model.recommend_items(
-            user_idx, user_item_matrix, request.n_recommendations
-        )
+        # Get recommendations
+        try:
+            model = models_dict[request.model_name]
+            raw_recommendations = model.recommend_items(
+                user_idx, user_item_matrix, request.n_recommendations
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error generating recommendations: {str(e)}"
+            )
         
-        item_ratings = ratings[ratings['item_id'] == original_item_id]['rating']
-        rating_stats = {
-            "mean_rating": float(item_ratings.mean()) if not item_ratings.empty else None,
-            "total_ratings": int(item_ratings.count())
-        }
-
-        # Convert recommendations to movie details
+        # Process recommendations
         recommendations = []
         for item_idx, score in raw_recommendations:
-            # Convert item index back to original item ID
-            original_item_id = preprocessor.item_encoder.classes_[item_idx]
-            
-            # Get movie details
-            movie_info = movies_df[movies_df['item_id'] == original_item_id].iloc[0]
-            
-            recommendations.append({
-                "item_id": int(original_item_id),
-                "title": movie_info['title'],
-                "predicted_rating": float(score),
-                "genres": [genre for genre in ['Action', 'Adventure', 'Animation', 'Children',
+            try:
+                original_item_id = preprocessor.item_encoder.classes_[item_idx]
+                movie_info = movies_df[movies_df['item_id'] == original_item_id].iloc[0]
+                
+                genres = [genre for genre in ['Action', 'Adventure', 'Animation', 'Children',
                           'Comedy', 'Crime', 'Documentary', 'Drama', 'Fantasy',
                           'Film-Noir', 'Horror', 'Musical', 'Mystery', 'Romance',
                           'Sci-Fi', 'Thriller', 'War', 'Western'] 
-                          if movie_info[genre] == 1],
-                "year": int(movie_info['year']) if pd.notna(movie_info['year']) else None,
-            "release_date": movie_info['release_date'] if pd.notna(movie_info['release_date']) else None,
-            "imdb_url": movie_info['imdb_url'] if pd.notna(movie_info['imdb_url']) else None,
-            "rating_statistics": rating_stats,
-            "popularity_rank": "High" if rating_stats["total_ratings"] > 100 else 
-                             "Medium" if rating_stats["total_ratings"] > 20 else "Low"
-        })
+                          if movie_info[genre] == 1]
+                
+                recommendations.append({
+                    "item_id": int(original_item_id),
+                    "title": str(movie_info['title']),
+                    "predicted_rating": float(score),
+                    "genres": genres,
+                    "year": int(movie_info['year']) if pd.notna(movie_info['year']) else None,
+                    "imdb_url": str(movie_info['imdb_url']) if pd.notna(movie_info['imdb_url']) else None
+                })
+            except Exception as e:
+                print(f"Warning: Could not process item {item_idx}: {e}")
+                continue
+        
+        if not recommendations:
+            raise HTTPException(
+                status_code=404,
+                detail="No recommendations could be generated for this user"
+            )
+        
+        return {
+            "user_id": int(request.user_id),
+            "recommendations": recommendations,
+            "model_used": str(request.model_name),
+            "metadata": {
+                "total_recommendations": len(recommendations),
+                "user_profile_size": int(np.sum(user_item_matrix[user_idx] > 0)),
+                "average_predicted_rating": float(np.mean([r["predicted_rating"] for r in recommendations]))
+            }
+        }
         
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        print("=" * 60)
+        print("ERROR in get_recommendations:")
+        traceback.print_exc()
+        print("=" * 60)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+@app.post("/predict")
+async def predict_rating(request: UserRatingRequest):
+    """Predict rating for a specific user-item pair"""
+    try:
+        # Validate inputs
+        if request.user_id < 1:
+            raise HTTPException(status_code=400, detail="User ID must be positive")
+        
+        if request.item_id < 1:
+            raise HTTPException(status_code=400, detail="Item ID must be positive")
+        
+        # Convert IDs to indices
+        try:
+            if request.user_id not in preprocessor.user_encoder.classes_:
+                raise HTTPException(status_code=404, detail=f"User ID {request.user_id} not found")
+            
+            if request.item_id not in preprocessor.item_encoder.classes_:
+                raise HTTPException(status_code=404, detail=f"Item ID {request.item_id} not found")
+            
+            user_idx = preprocessor.user_encoder.transform([request.user_id])[0]
+            item_idx = preprocessor.item_encoder.transform([request.item_id])[0]
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error converting IDs: {str(e)}")
+        
+        # Use hybrid model for prediction
+        model = models_dict['WeightedHybrid']
+        predicted_rating = model.predict(user_idx, item_idx)
+        
+        # Calculate confidence
+        user_activity = np.sum(user_item_matrix[user_idx] > 0)
+        item_popularity = np.sum(user_item_matrix[:, item_idx] > 0)
+        confidence = min((user_activity / 50.0) * (item_popularity / 50.0), 1.0)
+        
+        return {
+            "user_id": int(request.user_id),
+            "item_id": int(request.item_id),
+            "predicted_rating": float(predicted_rating),
+            "model_used": "WeightedHybrid",
+            "confidence": float(confidence)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.post("/compare-models")
+async def compare_model_predictions(request: UserRatingRequest):
+    """Compare predictions from all available models"""
+    try:
+        # Convert IDs to indices
+        try:
+            if request.user_id not in preprocessor.user_encoder.classes_:
+                valid_range = f"1 to {max(preprocessor.user_encoder.classes_)}"
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"User ID {request.user_id} not found. Valid range: {valid_range}"
+                )
+            
+            user_idx = preprocessor.user_encoder.transform([request.user_id])[0]
+            item_idx = preprocessor.item_encoder.transform([request.item_id])[0]
+            
+        except HTTPException:
+            raise
+        except ValueError:
+            raise HTTPException(
+                status_code=404,
+                detail=f"User ID {request.user_id} or Item ID {request.item_id} not found"
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error converting IDs: {str(e)}"
+            )
+        
+        # Get predictions from all models
+        predictions = {}
+        valid_predictions = []
+        
+        for model_name, model in models_dict.items():
+            try:
+                pred = model.predict(user_idx, item_idx)
+                predictions[model_name] = float(pred)
+                valid_predictions.append(pred)
+            except Exception as e:
+                print(f"Model {model_name} failed: {e}")
+                predictions[model_name] = None
+        
+        # Calculate ensemble prediction
+        ensemble_prediction = float(np.mean(valid_predictions)) if valid_predictions else 3.0
+        
+        return {
+            "user_id": int(request.user_id),
+            "item_id": int(request.item_id),
+            "predictions": predictions,
+            "ensemble_prediction": ensemble_prediction
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print("=" * 60)
+        print("ERROR in compare_model_predictions:")
+        traceback.print_exc()
+        print("=" * 60)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+
 
 @app.get("/similar-movies/{item_id}")
 async def get_similar_movies(item_id: int, n_similar: int = Query(default=5, ge=1, le=20)):
@@ -371,11 +522,80 @@ async def get_dataset_statistics():
 # Error handlers
 @app.exception_handler(404)
 async def not_found_handler(request, exc):
-    return {"error": "Endpoint not found", "detail": str(exc)}
+    """Handle 404 errors"""
+    return JSONResponse(
+        status_code=404,
+        content={"error": "Endpoint not found", "detail": str(exc)}
+    )
 
 @app.exception_handler(500)
 async def internal_error_handler(request, exc):
-    return {"error": "Internal server error", "detail": "Something went wrong"}
+    """Handle 500 errors"""
+    return JSONResponse(
+        status_code=500,
+        content={"error": "Internal server error", "detail": "Something went wrong"}
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request, exc):
+    """Handle all other exceptions"""
+    import traceback
+    error_details = traceback.format_exc()
+    print(f"Unhandled exception: {error_details}")
+    
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal server error",
+            "detail": str(exc),
+            "type": type(exc).__name__
+        }
+    )
+
+# Error handlers with proper JSON responses
+from fastapi import Request
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Handle HTTP exceptions properly"""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": f"HTTP {exc.status_code}",
+            "detail": exc.detail
+        }
+    )
+
+@app.exception_handler(HTTPException)
+async def fastapi_http_exception_handler(request: Request, exc: HTTPException):
+    """Handle FastAPI HTTP exceptions"""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": f"HTTP {exc.status_code}",
+            "detail": exc.detail
+        }
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Handle all other exceptions"""
+    import traceback
+    error_details = traceback.format_exc()
+    print("=" * 60)
+    print(f"Unhandled Exception: {type(exc).__name__}")
+    print(error_details)
+    print("=" * 60)
+    
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal server error",
+            "detail": str(exc),
+            "type": type(exc).__name__
+        }
+    )
 
 if __name__ == "__main__":
     import uvicorn
