@@ -404,6 +404,135 @@ async def compare_model_predictions(request: UserRatingRequest):
             detail=f"Internal server error: {str(e)}"
         )
 
+@app.get("/user/{user_id}/profile")
+async def get_user_profile(user_id: int):
+    """Get user profile information"""
+    try:
+        # Validate user ID
+        if user_id < 1:
+            raise HTTPException(status_code=400, detail="User ID must be positive")
+        
+        # Convert to index
+        try:
+            if user_id not in preprocessor.user_encoder.classes_:
+                raise HTTPException(status_code=404, detail=f"User ID {user_id} not found")
+            
+            user_idx = preprocessor.user_encoder.transform([user_id])[0]
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error converting user ID: {str(e)}")
+        
+        # Get user ratings
+        user_ratings = user_item_matrix[user_idx]
+        rated_items = np.where(user_ratings > 0)[0]
+        
+        # Get rating statistics
+        ratings_stats = {
+            "total_ratings": int(len(rated_items)),
+            "average_rating": float(np.mean(user_ratings[rated_items])) if len(rated_items) > 0 else 0.0,
+            "rating_std": float(np.std(user_ratings[rated_items])) if len(rated_items) > 1 else 0.0,
+            "min_rating": float(np.min(user_ratings[rated_items])) if len(rated_items) > 0 else 0.0,
+            "max_rating": float(np.max(user_ratings[rated_items])) if len(rated_items) > 0 else 0.0
+        }
+        
+        # Get favorite genres
+        genre_preferences = {}
+        genre_cols = ['Action', 'Adventure', 'Animation', 'Children', 'Comedy', 'Crime',
+                     'Documentary', 'Drama', 'Fantasy', 'Film-Noir', 'Horror', 'Musical',
+                     'Mystery', 'Romance', 'Sci-Fi', 'Thriller', 'War', 'Western']
+        
+        for genre in genre_cols:
+            genre_ratings = []
+            for item_idx in rated_items:
+                original_item_id = preprocessor.item_encoder.classes_[item_idx]
+                movie = movies_df[movies_df['item_id'] == original_item_id].iloc[0]
+                if movie[genre] == 1:
+                    genre_ratings.append(user_ratings[item_idx])
+            
+            if genre_ratings:
+                genre_preferences[genre] = {
+                    "average_rating": float(np.mean(genre_ratings)),
+                    "count": len(genre_ratings)
+                }
+        
+        # Sort genres by average rating
+        favorite_genres = sorted(
+            [(genre, info["average_rating"]) for genre, info in genre_preferences.items()],
+            key=lambda x: x[1],
+            reverse=True
+        )[:5]
+        
+        return {
+            "user_id": user_id,
+            "rating_statistics": ratings_stats,
+            "favorite_genres": [{"genre": genre, "avg_rating": rating} for genre, rating in favorite_genres],
+            "activity_level": "High" if ratings_stats["total_ratings"] > 100 else 
+                           "Medium" if ratings_stats["total_ratings"] > 20 else "Low"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/movie/{item_id}/info")
+async def get_movie_info(item_id: int):
+    """Get detailed movie information"""
+    try:
+        # Find movie
+        movie = movies_df[movies_df['item_id'] == item_id]
+        if movie.empty:
+            raise HTTPException(status_code=404, detail=f"Movie with ID {item_id} not found")
+        
+        movie_info = movie.iloc[0]
+        
+        # Get movie statistics
+        try:
+            if item_id in preprocessor.item_encoder.classes_:
+                item_idx = preprocessor.item_encoder.transform([item_id])[0]
+                item_ratings = user_item_matrix[:, item_idx]
+                rated_users = np.where(item_ratings > 0)[0]
+                
+                rating_stats = {
+                    "total_ratings": int(len(rated_users)),
+                    "average_rating": float(np.mean(item_ratings[rated_users])) if len(rated_users) > 0 else 0.0,
+                    "rating_std": float(np.std(item_ratings[rated_users])) if len(rated_users) > 1 else 0.0
+                }
+            else:
+                rating_stats = {"total_ratings": 0, "average_rating": 0.0, "rating_std": 0.0}
+        except Exception as e:
+            print(f"Warning: Could not get rating stats: {e}")
+            rating_stats = {"total_ratings": 0, "average_rating": 0.0, "rating_std": 0.0}
+        
+        # Extract genres
+        genres = [genre for genre in ['Action', 'Adventure', 'Animation', 'Children',
+                  'Comedy', 'Crime', 'Documentary', 'Drama', 'Fantasy',
+                  'Film-Noir', 'Horror', 'Musical', 'Mystery', 'Romance',
+                  'Sci-Fi', 'Thriller', 'War', 'Western'] 
+                  if movie_info[genre] == 1]
+        
+        return {
+            "item_id": int(item_id),
+            "title": str(movie_info['title']),
+            "genres": genres,
+            "year": int(movie_info['year']) if pd.notna(movie_info['year']) else None,
+            "release_date": str(movie_info['release_date']) if pd.notna(movie_info['release_date']) else None,
+            "imdb_url": str(movie_info['imdb_url']) if pd.notna(movie_info['imdb_url']) else None,
+            "rating_statistics": rating_stats,
+            "popularity_rank": "High" if rating_stats["total_ratings"] > 100 else 
+                             "Medium" if rating_stats["total_ratings"] > 20 else "Low"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @app.get("/similar-movies/{item_id}")
